@@ -1,10 +1,281 @@
-const response = await fetch(
-    "https://guz5y3fg5b.execute-api.ap-southeast-2.amazonaws.com/upload",
-    {
-        method: "POST",
-        headers: {
-            "file-name": file.name
-        },
-        body: base64
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CloudVault | AWS File Storage</title>
+<style>
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #0b1120;
+    color: #e5e7eb;
+}
+header {
+    padding: 24px 8%;
+    border-bottom: 1px solid #263247;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.logo { font-size: 24px; font-weight: bold; color: #60a5fa; }
+.status { color: #4ade80; font-size: 13px; }
+main { max-width: 1000px; margin: 45px auto; padding: 20px; }
+h1 { font-size: 32px; margin-bottom: 8px; }
+.subtitle { color: #94a3b8; margin-bottom: 30px; }
+.card {
+    background: #151f32;
+    border: 1px solid #293750;
+    border-radius: 14px;
+    padding: 25px;
+    margin-bottom: 24px;
+}
+.upload-area {
+    border: 2px dashed #3b82f6;
+    border-radius: 12px;
+    padding: 35px 15px;
+    text-align: center;
+}
+input[type=file] { margin: 18px 0; max-width: 100%; }
+button {
+    border: 0;
+    border-radius: 7px;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-weight: bold;
+    margin: 4px;
+}
+.primary { background: #2563eb; color: white; }
+.download { background: #166534; color: white; }
+.delete { background: #991b1b; color: white; }
+.refresh { background: #334155; color: white; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.file-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 15px 5px;
+    border-bottom: 1px solid #293750;
+}
+.file-name { overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; }
+#message { margin-top: 15px; color: #60a5fa; }
+.note { color: #94a3b8; font-size: 13px; }
+footer {
+    text-align: center;
+    color: #64748b;
+    padding: 30px;
+}
+@media(max-width:600px) {
+    .file-row { align-items: flex-start; flex-direction: column; }
+    header { padding: 20px; }
+    h1 { font-size: 26px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+    <div class="logo">☁ CloudVault</div>
+    <div class="status">● AWS Connected</div>
+</header>
+
+<main>
+    <h1>My Cloud Storage</h1>
+    <p class="subtitle">
+        Securely upload, manage and download your files using AWS S3.
+    </p>
+
+    <section class="card">
+        <h2>Upload a file</h2>
+        <div class="upload-area">
+            <p>Select a file from your computer</p>
+            <input type="file" id="fileInput">
+            <br>
+            <button class="primary" id="uploadBtn" onclick="uploadFile()">
+                Upload to AWS
+            </button>
+            <p class="note">Maximum file size: 4 MB</p>
+        </div>
+        <p id="message"></p>
+    </section>
+
+    <section class="card">
+        <h2>Stored Files</h2>
+        <button class="refresh" onclick="loadFiles()">↻ Refresh Files</button>
+        <div id="fileList">Loading files...</div>
+    </section>
+</main>
+
+<footer>
+    AWS File Storage System | Powered by Amazon S3 and AWS Lambda
+</footer>
+
+<script>
+const API = "https://guz5y3fg5b.execute-api.ap-southeast-2.amazonaws.com";
+
+const fileInput = document.getElementById("fileInput");
+const message = document.getElementById("message");
+const uploadBtn = document.getElementById("uploadBtn");
+const fileList = document.getElementById("fileList");
+
+function showMessage(text, isError = false) {
+    message.textContent = text;
+    message.style.color = isError ? "#f87171" : "#4ade80";
+}
+
+async function uploadFile() {
+    const file = fileInput.files[0];
+
+    if (!file) {
+        showMessage("Please select a file first.", true);
+        return;
     }
-);
+
+    if (file.size > 4 * 1024 * 1024) {
+        showMessage("File size must be 4 MB or less.", true);
+        return;
+    }
+
+    uploadBtn.disabled = true;
+    showMessage("Uploading file to AWS...");
+
+    try {
+        const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(",")[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+
+        const response = await fetch(API + "/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                fileName: file.name,
+                content: base64
+            })
+        });
+
+        const result = await response.text();
+
+        if (!response.ok) {
+            throw new Error(result);
+        }
+
+        showMessage("File uploaded successfully!");
+        fileInput.value = "";
+        await loadFiles();
+
+    } catch (error) {
+        showMessage("Upload failed: " + error.message, true);
+    } finally {
+        uploadBtn.disabled = false;
+    }
+}
+
+async function loadFiles() {
+    fileList.textContent = "Loading files...";
+
+    try {
+        const response = await fetch(API + "/files");
+
+        if (!response.ok) {
+            throw new Error("Could not retrieve files.");
+        }
+
+        const files = await response.json();
+        fileList.replaceChildren();
+
+        if (!files.length) {
+            fileList.textContent = "No files found in your storage.";
+            return;
+        }
+
+        files.forEach(filename => {
+            const row = document.createElement("div");
+            row.className = "file-row";
+
+            const name = document.createElement("span");
+            name.className = "file-name";
+            name.textContent = "📄 " + filename;
+
+            const actions = document.createElement("div");
+            actions.className = "actions";
+
+            const downloadBtn = document.createElement("button");
+            downloadBtn.className = "download";
+            downloadBtn.textContent = "Download";
+            downloadBtn.onclick = () => downloadFile(filename);
+
+            const deleteBtn = document.createElement("button");
+            deleteBtn.className = "delete";
+            deleteBtn.textContent = "Delete";
+            deleteBtn.onclick = () => deleteFile(filename);
+
+            actions.append(downloadBtn, deleteBtn);
+            row.append(name, actions);
+            fileList.appendChild(row);
+        });
+
+    } catch (error) {
+        fileList.textContent = "Error: " + error.message;
+    }
+}
+
+async function downloadFile(filename) {
+    try {
+        const response = await fetch(
+            API + "/download/" + encodeURIComponent(filename)
+        );
+
+        if (!response.ok) {
+            throw new Error("Download failed.");
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        URL.revokeObjectURL(url);
+
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+async function deleteFile(filename) {
+    if (!confirm("Are you sure you want to delete " + filename + "?")) {
+        return;
+    }
+
+    try {
+        const response = await fetch(
+            API + "/delete/" + encodeURIComponent(filename),
+            { method: "DELETE" }
+        );
+
+        if (!response.ok) {
+            throw new Error("Delete failed.");
+        }
+
+        showMessage(filename + " deleted successfully.");
+        await loadFiles();
+
+    } catch (error) {
+        showMessage(error.message, true);
+    }
+}
+
+loadFiles();
+</script>
+</body>
+</html>
